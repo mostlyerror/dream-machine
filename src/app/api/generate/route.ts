@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
+import { updateProgress, clearProgress } from '../progress/route';
+import { v4 as uuidv4 } from 'uuid';
 
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN,
@@ -23,7 +25,7 @@ const promptMap = {
   composition: "Create alternative compositions of this image, exploring different angles, framing, and arrangements of elements",
 };
 
-async function waitForPrediction(prediction: any, maxAttempts = 30): Promise<any> {
+async function waitForPrediction(prediction: any, generationId: string, maxAttempts = 30): Promise<any> {
   let attempts = 0;
   
   while (attempts < maxAttempts) {
@@ -34,11 +36,20 @@ async function waitForPrediction(prediction: any, maxAttempts = 30): Promise<any
       attempts: attempts + 1,
     });
 
-    if (status.status === 'succeeded') {
+    // Calculate progress percentage
+    const progress = Math.min(100, Math.round((attempts / maxAttempts) * 100));
+    
+    // Update progress based on prediction status
+    if (status.status === 'processing') {
+      updateProgress(generationId, 'processing', progress, 'Processing image...');
+    } else if (status.status === 'succeeded') {
+      updateProgress(generationId, 'complete', 100, 'Generation complete!');
       return status.output;
     } else if (status.status === 'failed') {
+      updateProgress(generationId, 'error', progress, `Generation failed: ${status.error}`);
       throw new Error(`Prediction failed: ${status.error}`);
     } else if (status.status === 'canceled') {
+      updateProgress(generationId, 'error', progress, 'Generation was canceled');
       throw new Error('Prediction was canceled');
     }
 
@@ -47,10 +58,13 @@ async function waitForPrediction(prediction: any, maxAttempts = 30): Promise<any
     attempts++;
   }
 
+  updateProgress(generationId, 'error', 100, 'Generation timed out');
   throw new Error('Prediction timed out');
 }
 
 export async function POST(request: Request) {
+  const generationId = uuidv4();
+  
   try {
     const { image, transformation } = await request.json();
 
@@ -81,6 +95,8 @@ export async function POST(request: Request) {
       imageLength: image.length,
     });
 
+    updateProgress(generationId, 'starting', 0, 'Starting image generation...');
+
     try {
       // Start the prediction
       const prediction = await replicate.predictions.create({
@@ -104,8 +120,10 @@ export async function POST(request: Request) {
         status: prediction.status,
       });
 
+      updateProgress(generationId, 'generating', 10, 'Generating images...');
+
       // Wait for the prediction to complete
-      const output = await waitForPrediction(prediction);
+      const output = await waitForPrediction(prediction, generationId);
 
       console.log('Raw Replicate response:', {
         output,
@@ -144,6 +162,7 @@ export async function POST(request: Request) {
 
       if (imageUrls.length === 0) {
         console.error('No valid image URLs found in response:', output);
+        updateProgress(generationId, 'error', 100, 'No valid images were generated');
         return NextResponse.json(
           { 
             error: 'No valid images were generated',
@@ -160,6 +179,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({ 
         images: imageUrls,
+        generationId,
         debug: {
           totalOutputs: imageUrls.length,
           rawResponse: output,
@@ -172,6 +192,7 @@ export async function POST(request: Request) {
         stack: replicateError instanceof Error ? replicateError.stack : undefined,
       });
 
+      updateProgress(generationId, 'error', 100, 'Failed to generate images');
       return NextResponse.json(
         { 
           error: 'Failed to generate images',
@@ -190,6 +211,7 @@ export async function POST(request: Request) {
       stack: error instanceof Error ? error.stack : undefined,
     });
 
+    updateProgress(generationId, 'error', 100, 'An unexpected error occurred');
     return NextResponse.json(
       { 
         error: 'An unexpected error occurred',
@@ -200,5 +222,8 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     );
+  } finally {
+    // Clear progress after a delay to ensure the client receives the final update
+    setTimeout(() => clearProgress(generationId), 5000);
   }
 } 

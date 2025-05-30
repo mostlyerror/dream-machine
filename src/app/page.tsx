@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 
 const transformations = [
@@ -32,13 +32,23 @@ interface DebugInfo {
 
 export default function Home() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [selectedTransformation, setSelectedTransformation] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [selectedTransformation, setSelectedTransformation] = useState<string>('');
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<DebugInfo>({});
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [generationStatus, setGenerationStatus] = useState<{
+    status: 'idle' | 'starting' | 'generating' | 'processing';
+    progress: number;
+    message: string;
+  }>({
+    status: 'idle',
+    progress: 0,
+    message: '',
+  });
+  const [eventSource, setEventSource] = useState<EventSource | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -73,22 +83,72 @@ export default function Home() {
     }
   };
 
+  // Function to connect to SSE
+  const connectToSSE = (generationId: string) => {
+    // Close existing connection if any
+    if (eventSource) {
+      eventSource.close();
+    }
+
+    // Create new EventSource connection
+    const source = new EventSource(`/api/progress?id=${generationId}`);
+    setEventSource(source);
+
+    // Handle incoming messages
+    source.onmessage = (event) => {
+      try {
+        const progress = JSON.parse(event.data);
+        setGenerationStatus({
+          status: progress.status,
+          progress: progress.progress,
+          message: progress.message,
+        });
+      } catch (error) {
+        console.error('Error parsing progress update:', error);
+      }
+    };
+
+    // Handle errors
+    source.onerror = (error) => {
+      console.error('SSE Error:', error);
+      source.close();
+      setEventSource(null);
+    };
+
+    return source;
+  };
+
+  // Clean up EventSource on unmount
+  useEffect(() => {
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [eventSource]);
+
   const handleGenerate = async () => {
-    if (!selectedImage || !selectedTransformation) return;
-    
+    if (!selectedImage || !selectedTransformation) {
+      setError('Please select an image and transformation');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
-    setDebugInfo({});
-    
+    setGeneratedImages([]);
+    setDebugInfo(null);
+    setGenerationStatus({
+      status: 'starting',
+      progress: 0,
+      message: 'Starting image generation...',
+    });
+
     try {
-      const requestInfo = {
+      console.log('Starting generation request:', {
         transformation: selectedTransformation,
         imageLength: selectedImage.length,
         timestamp: new Date().toISOString(),
-      };
-      
-      setDebugInfo(prev => ({ ...prev, request: requestInfo }));
-      console.log('Starting generation request:', requestInfo);
+      });
 
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -101,58 +161,56 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json();
-      const responseInfo = {
+      console.log('API Response:', {
         status: response.status,
         ok: response.ok,
-        data: {
-          ...data,
-          images: data.images ? `${data.images.length} images` : 'no images',
-          debug: data.debug,
-        },
         timestamp: new Date().toISOString(),
-      };
-      
-      setDebugInfo(prev => ({ ...prev, response: responseInfo }));
-      console.log('API Response:', responseInfo);
+      });
+
+      const data = await response.json();
+      console.log('Response data:', {
+        images: data.images?.length || 0,
+        timestamp: new Date().toISOString(),
+      });
 
       if (!response.ok) {
-        throw new Error(data.error || data.details || 'Failed to generate images');
-      }
-      
-      // Ensure we have an array of images
-      if (!Array.isArray(data.images)) {
-        console.error('Invalid response format:', data);
-        throw new Error(`Invalid response format from the server: ${JSON.stringify(data)}`);
+        throw new Error(data.error || 'Failed to generate images');
       }
 
-      // Filter out any invalid image URLs
-      const validImages = data.images.filter((url: any) => {
-        return typeof url === 'string' && url.length > 0 && url.startsWith('http');
-      });
-      
-      if (validImages.length === 0) {
-        console.error('No valid images in response:', data);
-        throw new Error(`No valid images were generated. API Response: ${JSON.stringify(data.debug?.rawResponse)}`);
+      if (!data.images || data.images.length === 0) {
+        throw new Error('No valid images were generated');
       }
 
-      console.log('Successfully processed images:', {
-        total: data.images.length,
-        valid: validImages.length,
-        debug: data.debug,
+      // Connect to SSE for progress updates
+      if (data.generationId) {
+        connectToSSE(data.generationId);
+      }
+
+      setGeneratedImages(data.images);
+      setDebugInfo({
+        request: {
+          transformation: selectedTransformation,
+          imageLength: selectedImage.length,
+          timestamp: new Date().toISOString(),
+        },
+        response: {
+          status: response.status,
+          ok: response.ok,
+          data: data,
+          timestamp: new Date().toISOString(),
+        },
       });
-      
-      setGeneratedImages(validImages);
-    } catch (error) {
-      console.error('Generation error:', error);
-      const errorInfo = {
-        message: error instanceof Error ? error.message : 'An unexpected error occurred',
-        details: error,
-        timestamp: new Date().toISOString(),
-      };
-      setDebugInfo(prev => ({ ...prev, error: errorInfo }));
-      setError(errorInfo.message);
-      setGeneratedImages([]); // Clear any previous generated images on error
+    } catch (err) {
+      console.error('Generation error:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred');
+      setDebugInfo(prev => prev ? {
+        ...prev,
+        error: {
+          message: err instanceof Error ? err.message : 'An error occurred',
+          details: err instanceof Error ? err : {},
+          timestamp: new Date().toISOString(),
+        }
+      } : null);
     } finally {
       setIsLoading(false);
     }
@@ -170,27 +228,23 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen p-8 bg-gray-50">
-      <div className="max-w-4xl mx-auto">
+    <main className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white p-8">
+      <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900">Dream Machine</h1>
-          <label className="flex items-center space-x-2 cursor-pointer">
-            <span className="text-sm text-gray-600">Debug Mode</span>
-            <div className="relative">
+          <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">
+            Dream Machine
+          </h1>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-gray-300">
               <input
                 type="checkbox"
-                className="sr-only"
                 checked={isDebugMode}
                 onChange={(e) => setIsDebugMode(e.target.checked)}
+                className="form-checkbox h-4 w-4 text-purple-600"
               />
-              <div className={`block w-14 h-8 rounded-full transition-colors ${
-                isDebugMode ? 'bg-blue-600' : 'bg-gray-300'
-              }`}></div>
-              <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${
-                isDebugMode ? 'transform translate-x-6' : ''
-              }`}></div>
-            </div>
-          </label>
+              Debug Mode
+            </label>
+          </div>
         </div>
         
         {/* Error Toast */}
@@ -374,6 +428,30 @@ export default function Home() {
                   />
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="mt-8 p-6 bg-gray-800 rounded-lg border border-gray-700">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+              <div>
+                <h3 className="text-lg font-semibold text-purple-400">
+                  {generationStatus.message}
+                </h3>
+                <p className="text-sm text-gray-400">
+                  This may take up to a minute...
+                </p>
+              </div>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-2">
+              <div
+                className="bg-purple-500 h-2 rounded-full transition-all duration-300"
+                style={{
+                  width: `${generationStatus.progress}%`,
+                }}
+              ></div>
             </div>
           </div>
         )}
