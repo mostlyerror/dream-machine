@@ -4,11 +4,11 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 
 const transformations = [
-  { id: 'sargent', label: 'Sargent Style' },
-  { id: 'surrealist', label: 'Make it surrealist' },
-  { id: 'color-palette', label: 'Vary the color palette' },
-  { id: 'background', label: 'Change the background' },
-  { id: 'composition', label: 'Show alternate compositions' },
+  { id: 'sargent', label: 'Sargent Style 🎨' },
+  { id: 'surrealist', label: 'Make it surrealist 🌈' },
+  { id: 'color-palette', label: 'Vary the color palette 🎨' },
+  { id: 'background', label: 'Change the background 🌅' },
+  { id: 'composition', label: 'Show alternate compositions 🖼️' },
 ];
 
 interface DebugInfo {
@@ -29,59 +29,6 @@ interface DebugInfo {
     timestamp: string;
   };
 }
-
-const DreamMachineLogo = () => (
-  <svg
-    width="32"
-    height="24"
-    viewBox="0 0 40 30"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    className="transition-transform duration-300 hover:rotate-12"
-  >
-    {/* Cloud shape */}
-    <path
-      d="M35 20C37.7614 20 40 17.7614 40 15C40 12.2386 37.7614 10 35 10C35 5 30 0 25 0C20 0 15 5 15 10C12.2386 10 10 12.2386 10 15C10 17.7614 12.2386 20 15 20H35Z"
-      fill="url(#cloudGradient)"
-      stroke="url(#cloudStroke)"
-      strokeWidth="1.5"
-    />
-    
-    {/* Neural network pattern inside cloud */}
-    <path
-      d="M20 10C20 10 22 8 25 8C28 8 30 10 30 10M20 15C20 15 22 13 25 13C28 13 30 15 30 15M20 20C20 20 22 18 25 18C28 18 30 20 30 20"
-      stroke="url(#cloudStroke)"
-      strokeWidth="1"
-      strokeLinecap="round"
-    />
-    
-    {/* Gradient definitions */}
-    <defs>
-      <linearGradient
-        id="cloudGradient"
-        x1="10"
-        y1="0"
-        x2="40"
-        y2="20"
-        gradientUnits="userSpaceOnUse"
-      >
-        <stop offset="0%" stopColor="#A855F7" stopOpacity="0.2" />
-        <stop offset="100%" stopColor="#EC4899" stopOpacity="0.2" />
-      </linearGradient>
-      <linearGradient
-        id="cloudStroke"
-        x1="10"
-        y1="0"
-        x2="40"
-        y2="20"
-        gradientUnits="userSpaceOnUse"
-      >
-        <stop offset="0%" stopColor="#A855F7" />
-        <stop offset="100%" stopColor="#EC4899" />
-      </linearGradient>
-    </defs>
-  </svg>
-);
 
 export default function Home() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -281,20 +228,18 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white">
+    <main className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white font-plus-jakarta">
       {/* Header */}
       <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="flex items-baseline gap-2">
-              <div className="translate-y-[2px]">
-                <DreamMachineLogo />
-              </div>
-              <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600 hover:from-pink-600 hover:to-purple-400 transition-all duration-500">
+              <span className="text-3xl transform hover:rotate-12 transition-transform duration-300">☁️</span>
+              <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600 hover:from-pink-600 hover:to-purple-400 transition-all duration-500 tracking-tight">
                 Dream Machine
               </h1>
             </div>
-            <span className="text-xs px-2 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 animate-pulse">
+            <span className="text-xs px-2 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 animate-pulse font-medium">
               AI Magic ✨
             </span>
           </div>
