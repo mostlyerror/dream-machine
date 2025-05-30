@@ -1,103 +1,168 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import Image from 'next/image';
+
+const transformations = [
+  { id: 'sargent', label: 'Sargent Style' },
+  { id: 'surrealist', label: 'Make it surrealist' },
+  { id: 'color-palette', label: 'Vary the color palette' },
+  { id: 'background', label: 'Change the background' },
+  { id: 'composition', label: 'Show alternate compositions' },
+];
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedTransformation, setSelectedTransformation] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePinterestUrl = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedImage(e.target.value);
+  };
+
+  const handleGenerate = async () => {
+    if (!selectedImage || !selectedTransformation) return;
+    
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: selectedImage,
+          transformation: selectedTransformation,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate images');
+      }
+
+      const data = await response.json();
+      setGeneratedImages(data.images);
+    } catch (error) {
+      console.error('Error:', error);
+      // TODO: Add proper error handling UI
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen p-8 bg-gray-50">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl font-bold text-gray-900 mb-8">Dream Machine</h1>
+        
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+          <div className="space-y-6">
+            {/* Image Upload Section */}
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold text-gray-800">Upload Image</h2>
+              <div className="flex flex-col space-y-4">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="hidden"
+                    id="image-upload"
+                  />
+                  <label
+                    htmlFor="image-upload"
+                    className="cursor-pointer text-blue-600 hover:text-blue-800"
+                  >
+                    Click to upload or drag and drop
+                  </label>
+                </div>
+                
+                <div className="text-center text-gray-500">or</div>
+                
+                <input
+                  type="text"
+                  placeholder="Paste Pinterest image URL"
+                  onChange={handlePinterestUrl}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {/* Preview Section */}
+            {selectedImage && (
+              <div className="relative w-full h-64 rounded-lg overflow-hidden">
+                <Image
+                  src={selectedImage}
+                  alt="Selected image"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+            )}
+
+            {/* Transformation Selection */}
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold text-gray-800">Select Transformation</h2>
+              <select
+                value={selectedTransformation}
+                onChange={(e) => setSelectedTransformation(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Choose a transformation...</option>
+                {transformations.map((transformation) => (
+                  <option key={transformation.id} value={transformation.id}>
+                    {transformation.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Generate Button */}
+            <button
+              onClick={handleGenerate}
+              disabled={!selectedImage || !selectedTransformation || isLoading}
+              className={`w-full py-3 px-6 rounded-lg text-white font-semibold ${
+                !selectedImage || !selectedTransformation || isLoading
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              {isLoading ? 'Generating...' : 'Generate'}
+            </button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        {/* Generated Images Grid */}
+        {generatedImages.length > 0 && (
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">Generated Variants</h2>
+            <div className="grid grid-cols-2 gap-4">
+              {generatedImages.map((image, index) => (
+                <div key={index} className="relative w-full h-64 rounded-lg overflow-hidden">
+                  <Image
+                    src={image}
+                    alt={`Generated variant ${index + 1}`}
+                    fill
+                    className="object-contain"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
