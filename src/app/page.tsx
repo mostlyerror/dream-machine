@@ -16,26 +16,46 @@ export default function Home() {
   const [selectedTransformation, setSelectedTransformation] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        setError('Image size must be less than 10MB');
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setSelectedImage(reader.result as string);
+        setError(null);
+      };
+      reader.onerror = () => {
+        setError('Failed to read image file');
       };
       reader.readAsDataURL(file);
     }
   };
 
   const handlePinterestUrl = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSelectedImage(e.target.value);
+    const url = e.target.value;
+    if (url) {
+      if (!url.startsWith('https://')) {
+        setError('Please enter a valid HTTPS URL');
+        return;
+      }
+      setSelectedImage(url);
+      setError(null);
+    } else {
+      setSelectedImage(null);
+    }
   };
 
   const handleGenerate = async () => {
     if (!selectedImage || !selectedTransformation) return;
     
     setIsLoading(true);
+    setError(null);
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -49,14 +69,15 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate images');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate images');
       }
 
       const data = await response.json();
       setGeneratedImages(data.images);
     } catch (error) {
       console.error('Error:', error);
-      // TODO: Add proper error handling UI
+      setError(error instanceof Error ? error.message : 'An unexpected error occurred');
     } finally {
       setIsLoading(false);
     }
@@ -66,6 +87,35 @@ export default function Home() {
     <main className="min-h-screen p-8 bg-gray-50">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl font-bold text-gray-900 mb-8">Dream Machine</h1>
+        
+        {/* Error Toast */}
+        {error && (
+          <div className="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+              <div className="ml-auto pl-3">
+                <div className="-mx-1.5 -my-1.5">
+                  <button
+                    onClick={() => setError(null)}
+                    className="inline-flex rounded-md p-1.5 text-red-500 hover:bg-red-100 focus:outline-none"
+                  >
+                    <span className="sr-only">Dismiss</span>
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
           <div className="space-y-6">
@@ -87,6 +137,9 @@ export default function Home() {
                   >
                     Click to upload or drag and drop
                   </label>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Maximum file size: 10MB
+                  </p>
                 </div>
                 
                 <div className="text-center text-gray-500">or</div>
@@ -139,7 +192,17 @@ export default function Home() {
                   : 'bg-blue-600 hover:bg-blue-700'
               }`}
             >
-              {isLoading ? 'Generating...' : 'Generate'}
+              {isLoading ? (
+                <div className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating...
+                </div>
+              ) : (
+                'Generate'
+              )}
             </button>
           </div>
         </div>
