@@ -20,12 +20,16 @@ interface DebugInfo {
   response?: {
     status: number;
     ok: boolean;
-    data: any;
+    data: {
+      images?: string[];
+      generationId?: string;
+      error?: string;
+    };
     timestamp: string;
   };
   error?: {
     message: string;
-    details?: any;
+    details?: unknown;
     timestamp: string;
   };
 }
@@ -200,14 +204,14 @@ export default function Home() {
           timestamp: new Date().toISOString(),
         },
       });
-    } catch (err) {
-      console.error('Generation error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
+    } catch (error) {
+      console.error('Generation error:', error);
+      setError(error instanceof Error ? error.message : 'An error occurred');
       setDebugInfo(prev => prev ? {
         ...prev,
         error: {
-          message: err instanceof Error ? err.message : 'An error occurred',
-          details: err instanceof Error ? err : {},
+          message: error instanceof Error ? error.message : 'An error occurred',
+          details: error instanceof Error ? error : undefined,
           timestamp: new Date().toISOString(),
         }
       } : null);

@@ -3,6 +3,18 @@ import Replicate from 'replicate';
 import { updateProgress, clearProgress } from '../progress/route';
 import { v4 as uuidv4 } from 'uuid';
 
+interface PredictionResponse {
+  id: string;
+  status: 'starting' | 'processing' | 'succeeded' | 'failed' | 'canceled';
+  output?: string[];
+  error?: string;
+}
+
+interface GenerateRequest {
+  image: string;
+  transformation: string;
+}
+
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN,
 });
@@ -25,205 +37,138 @@ const promptMap = {
   composition: "Create alternative compositions of this image, exploring different angles, framing, and arrangements of elements",
 };
 
-async function waitForPrediction(prediction: any, generationId: string, maxAttempts = 30): Promise<any> {
+async function waitForPrediction(predictionId: string, generationId: string): Promise<string[]> {
   let attempts = 0;
-  
-  while (attempts < maxAttempts) {
-    const status = await replicate.predictions.get(prediction.id);
-    console.log('Prediction status:', {
-      id: prediction.id,
-      status: status.status,
-      attempts: attempts + 1,
-    });
+  const maxAttempts = 30; // 1 minute maximum wait time
 
-    // Calculate progress percentage
-    const progress = Math.min(100, Math.round((attempts / maxAttempts) * 100));
+  while (attempts < maxAttempts) {
+    const prediction = await replicate.predictions.get(predictionId) as PredictionResponse;
     
-    // Update progress based on prediction status
-    if (status.status === 'processing') {
-      updateProgress(generationId, 'processing', progress, 'Processing image...');
-    } else if (status.status === 'succeeded') {
-      updateProgress(generationId, 'complete', 100, 'Generation complete!');
-      return status.output;
-    } else if (status.status === 'failed') {
-      updateProgress(generationId, 'error', progress, `Generation failed: ${status.error}`);
-      throw new Error(`Prediction failed: ${status.error}`);
-    } else if (status.status === 'canceled') {
-      updateProgress(generationId, 'error', progress, 'Generation was canceled');
-      throw new Error('Prediction was canceled');
+    const progress = Math.min(100, Math.max(0, (attempts / maxAttempts) * 100));
+    console.log(`Prediction status: ${prediction.status}, Progress: ${progress}%`);
+    
+    if (prediction.status === 'processing') {
+      updateProgress(generationId, {
+        status: 'processing',
+        progress,
+        message: 'Processing image...',
+      });
+    } else if (prediction.status === 'succeeded' && prediction.output) {
+      updateProgress(generationId, {
+        status: 'complete',
+        progress: 100,
+        message: 'Generation complete!',
+      });
+      return prediction.output;
+    } else if (prediction.status === 'failed' || prediction.status === 'canceled') {
+      updateProgress(generationId, {
+        status: 'error',
+        progress,
+        message: prediction.error || 'Generation failed',
+      });
+      throw new Error(prediction.error || 'Prediction failed');
+    } else {
+      updateProgress(generationId, {
+        status: 'generating',
+        progress,
+        message: 'Generating images...',
+      });
     }
 
-    // Wait for 2 seconds before next attempt
     await new Promise(resolve => setTimeout(resolve, 2000));
     attempts++;
   }
 
-  updateProgress(generationId, 'error', 100, 'Generation timed out');
+  updateProgress(generationId, {
+    status: 'error',
+    progress: 100,
+    message: 'Generation timed out',
+  });
   throw new Error('Prediction timed out');
 }
 
 export async function POST(request: Request) {
-  const generationId = uuidv4();
-  
   try {
-    const { image, transformation } = await request.json();
+    const { image, transformation } = await request.json() as GenerateRequest;
 
-    // Input validation
     if (!image || !transformation) {
-      console.error('Missing required fields:', { image: !!image, transformation: !!transformation });
       return NextResponse.json(
         { error: 'Image and transformation are required' },
         { status: 400 }
       );
     }
 
-    const modelVersion = modelMap[transformation as keyof typeof modelMap];
-    const prompt = promptMap[transformation as keyof typeof promptMap];
-
-    if (!modelVersion || !prompt) {
-      console.error('Invalid transformation:', transformation);
-      return NextResponse.json(
-        { error: 'Invalid transformation' },
-        { status: 400 }
-      );
-    }
-
-    console.log('Starting image generation with:', {
+    const generationId = uuidv4();
+    console.log('Starting generation:', {
       transformation,
-      modelVersion,
-      prompt,
       imageLength: image.length,
+      generationId,
+      timestamp: new Date().toISOString(),
     });
 
-    updateProgress(generationId, 'starting', 0, 'Starting image generation...');
-
-    try {
-      // Start the prediction
-      const prediction = await replicate.predictions.create({
-        version: modelVersion,
-        input: {
-          image: image,
-          prompt: prompt,
-          num_outputs: 4,
-          scheduler: "K_EULER",
-          num_inference_steps: 50,
-          guidance_scale: 7.5,
-          negative_prompt: "blurry, low quality, distorted, disfigured",
-          image_strength: 0.35,
-          width: 1024,
-          height: 1024,
-        }
-      });
-
-      console.log('Prediction started:', {
-        id: prediction.id,
-        status: prediction.status,
-      });
-
-      updateProgress(generationId, 'generating', 10, 'Generating images...');
-
-      // Wait for the prediction to complete
-      const output = await waitForPrediction(prediction, generationId);
-
-      console.log('Raw Replicate response:', {
-        output,
-        type: typeof output,
-        isArray: Array.isArray(output),
-        keys: output ? Object.keys(output) : null,
-      });
-
-      // Handle different response formats
-      let imageUrls: string[] = [];
-      if (Array.isArray(output)) {
-        // SDXL returns an array of image URLs
-        imageUrls = output.filter((url): url is string => 
-          typeof url === 'string' && url.startsWith('http')
-        );
-      } else if (typeof output === 'object' && output !== null) {
-        // Try to find image URLs in the response object
-        const findUrls = (obj: any): string[] => {
-          const urls: string[] = [];
-          if (typeof obj === 'string' && obj.startsWith('http')) {
-            urls.push(obj);
-          } else if (Array.isArray(obj)) {
-            obj.forEach(item => urls.push(...findUrls(item)));
-          } else if (typeof obj === 'object' && obj !== null) {
-            Object.values(obj).forEach(value => urls.push(...findUrls(value)));
-          }
-          return urls;
-        };
-        imageUrls = findUrls(output);
-      }
-
-      console.log('Processed image URLs:', {
-        total: imageUrls.length,
-        urls: imageUrls,
-      });
-
-      if (imageUrls.length === 0) {
-        console.error('No valid image URLs found in response:', output);
-        updateProgress(generationId, 'error', 100, 'No valid images were generated');
-        return NextResponse.json(
-          { 
-            error: 'No valid images were generated',
-            details: {
-              rawResponse: output,
-              responseType: typeof output,
-              isArray: Array.isArray(output),
-              keys: output ? Object.keys(output) : null,
-            }
-          },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ 
-        images: imageUrls,
-        generationId,
-        debug: {
-          totalOutputs: imageUrls.length,
-          rawResponse: output,
-        }
-      });
-    } catch (replicateError) {
-      console.error('Replicate API error:', {
-        error: replicateError,
-        message: replicateError instanceof Error ? replicateError.message : 'Unknown error',
-        stack: replicateError instanceof Error ? replicateError.stack : undefined,
-      });
-
-      updateProgress(generationId, 'error', 100, 'Failed to generate images');
-      return NextResponse.json(
-        { 
-          error: 'Failed to generate images',
-          details: {
-            message: replicateError instanceof Error ? replicateError.message : 'Unknown error',
-            type: replicateError instanceof Error ? replicateError.constructor.name : typeof replicateError,
-          }
-        },
-        { status: 500 }
-      );
-    }
-  } catch (error) {
-    console.error('General error:', {
-      error,
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
+    updateProgress(generationId, {
+      status: 'starting',
+      progress: 0,
+      message: 'Starting image generation...',
     });
 
-    updateProgress(generationId, 'error', 100, 'An unexpected error occurred');
-    return NextResponse.json(
-      { 
-        error: 'An unexpected error occurred',
-        details: {
-          message: error instanceof Error ? error.message : 'Unknown error',
-          type: error instanceof Error ? error.constructor.name : typeof error,
-        }
+    const prediction = await replicate.predictions.create({
+      version: "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+      input: {
+        image,
+        prompt: transformation,
+        image_strength: 0.35,
+        negative_prompt: "blurry, low quality, distorted, deformed",
+        width: 1024,
+        height: 1024,
+        num_outputs: 4,
+        scheduler: "K_EULER",
+        num_inference_steps: 50,
+        guidance_scale: 7.5,
       },
-      { status: 500 }
-    );
-  } finally {
+    }) as PredictionResponse;
+
+    console.log('Prediction started:', {
+      id: prediction.id,
+      status: prediction.status,
+      timestamp: new Date().toISOString(),
+    });
+
+    updateProgress(generationId, {
+      status: 'generating',
+      progress: 10,
+      message: 'Generating images...',
+    });
+
+    const output = await waitForPrediction(prediction.id, generationId);
+
+    console.log('Raw response:', {
+      type: typeof output,
+      isArray: Array.isArray(output),
+      keys: output ? Object.keys(output) : null,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (!output || !Array.isArray(output)) {
+      throw new Error('Invalid response format from Replicate API');
+    }
+
+    const images = output.filter(url => url && url.startsWith('http'));
+
+    if (images.length === 0) {
+      throw new Error('No valid images were generated');
+    }
+
     // Clear progress after a delay to ensure the client receives the final update
     setTimeout(() => clearProgress(generationId), 5000);
+
+    return NextResponse.json({ images, generationId });
+  } catch (error) {
+    console.error('Generation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    return NextResponse.json(
+      { error: errorMessage },
+      { status: 500 }
+    );
   }
 } 

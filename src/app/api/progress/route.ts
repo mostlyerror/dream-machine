@@ -1,25 +1,24 @@
 import { NextResponse } from 'next/server';
 
-// Store progress updates for each generation
-const progressUpdates = new Map<string, {
-  status: string;
+interface ProgressUpdate {
+  status: 'starting' | 'generating' | 'processing' | 'complete' | 'error';
   progress: number;
   message: string;
-}>();
-
-// Function to update progress for a specific generation
-export function updateProgress(generationId: string, status: string, progress: number, message: string) {
-  progressUpdates.set(generationId, { status, progress, message });
 }
 
-// Function to get progress for a specific generation
-export function getProgress(generationId: string) {
-  return progressUpdates.get(generationId);
+// Store progress updates for each generation
+const progressMap = new Map<string, ProgressUpdate>();
+
+export function updateProgress(generationId: string, update: ProgressUpdate) {
+  progressMap.set(generationId, update);
 }
 
-// Function to clear progress for a specific generation
+export function getProgress(generationId: string): ProgressUpdate | undefined {
+  return progressMap.get(generationId);
+}
+
 export function clearProgress(generationId: string) {
-  progressUpdates.delete(generationId);
+  progressMap.delete(generationId);
 }
 
 export async function GET(request: Request) {
@@ -27,30 +26,28 @@ export async function GET(request: Request) {
   const generationId = searchParams.get('id');
 
   if (!generationId) {
-    return new NextResponse('Missing generation ID', { status: 400 });
+    return NextResponse.json({ error: 'Generation ID is required' }, { status: 400 });
   }
 
-  // Set up SSE headers
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
-    start(controller) {
+    async start(controller) {
       // Send initial progress if available
       const initialProgress = getProgress(generationId);
       if (initialProgress) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(initialProgress)}\n\n`));
       }
 
-      // Set up interval to check for progress updates
+      // Check for updates every second
       const interval = setInterval(() => {
         const progress = getProgress(generationId);
         if (progress) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(progress)}\n\n`));
           
-          // If generation is complete, close the stream
-          if (progress.status === 'complete') {
+          // Close the stream if generation is complete or failed
+          if (progress.status === 'complete' || progress.status === 'error') {
             clearInterval(interval);
             controller.close();
-            clearProgress(generationId);
           }
         }
       }, 1000);
@@ -63,7 +60,7 @@ export async function GET(request: Request) {
     },
   });
 
-  return new NextResponse(stream, {
+  return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
