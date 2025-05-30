@@ -23,6 +23,33 @@ const promptMap = {
   composition: "Create alternative compositions of this image, exploring different angles, framing, and arrangements of elements",
 };
 
+async function waitForPrediction(prediction: any, maxAttempts = 30): Promise<any> {
+  let attempts = 0;
+  
+  while (attempts < maxAttempts) {
+    const status = await replicate.predictions.get(prediction.id);
+    console.log('Prediction status:', {
+      id: prediction.id,
+      status: status.status,
+      attempts: attempts + 1,
+    });
+
+    if (status.status === 'succeeded') {
+      return status.output;
+    } else if (status.status === 'failed') {
+      throw new Error(`Prediction failed: ${status.error}`);
+    } else if (status.status === 'canceled') {
+      throw new Error('Prediction was canceled');
+    }
+
+    // Wait for 2 seconds before next attempt
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    attempts++;
+  }
+
+  throw new Error('Prediction timed out');
+}
+
 export async function POST(request: Request) {
   try {
     const { image, transformation } = await request.json();
@@ -54,9 +81,10 @@ export async function POST(request: Request) {
       imageLength: image.length,
     });
 
-    const output = await replicate.run(
-      modelVersion,
-      {
+    try {
+      // Start the prediction
+      const prediction = await replicate.predictions.create({
+        version: modelVersion,
         input: {
           image: image,
           prompt: prompt,
@@ -64,49 +92,111 @@ export async function POST(request: Request) {
           scheduler: "K_EULER",
           num_inference_steps: 50,
           guidance_scale: 7.5,
+          negative_prompt: "blurry, low quality, distorted, disfigured",
+          image_strength: 0.35,
+          width: 1024,
+          height: 1024,
         }
+      });
+
+      console.log('Prediction started:', {
+        id: prediction.id,
+        status: prediction.status,
+      });
+
+      // Wait for the prediction to complete
+      const output = await waitForPrediction(prediction);
+
+      console.log('Raw Replicate response:', {
+        output,
+        type: typeof output,
+        isArray: Array.isArray(output),
+        keys: output ? Object.keys(output) : null,
+      });
+
+      // Handle different response formats
+      let imageUrls: string[] = [];
+      if (Array.isArray(output)) {
+        // SDXL returns an array of image URLs
+        imageUrls = output.filter((url): url is string => 
+          typeof url === 'string' && url.startsWith('http')
+        );
+      } else if (typeof output === 'object' && output !== null) {
+        // Try to find image URLs in the response object
+        const findUrls = (obj: any): string[] => {
+          const urls: string[] = [];
+          if (typeof obj === 'string' && obj.startsWith('http')) {
+            urls.push(obj);
+          } else if (Array.isArray(obj)) {
+            obj.forEach(item => urls.push(...findUrls(item)));
+          } else if (typeof obj === 'object' && obj !== null) {
+            Object.values(obj).forEach(value => urls.push(...findUrls(value)));
+          }
+          return urls;
+        };
+        imageUrls = findUrls(output);
       }
-    );
 
-    console.log('Generation response:', {
-      outputType: typeof output,
-      isArray: Array.isArray(output),
-      length: Array.isArray(output) ? output.length : 'N/A',
-      firstItem: Array.isArray(output) && output.length > 0 ? typeof output[0] : 'N/A',
-    });
+      console.log('Processed image URLs:', {
+        total: imageUrls.length,
+        urls: imageUrls,
+      });
 
-    if (!Array.isArray(output)) {
-      console.error('Unexpected output format:', output);
+      if (imageUrls.length === 0) {
+        console.error('No valid image URLs found in response:', output);
+        return NextResponse.json(
+          { 
+            error: 'No valid images were generated',
+            details: {
+              rawResponse: output,
+              responseType: typeof output,
+              isArray: Array.isArray(output),
+              keys: output ? Object.keys(output) : null,
+            }
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ 
+        images: imageUrls,
+        debug: {
+          totalOutputs: imageUrls.length,
+          rawResponse: output,
+        }
+      });
+    } catch (replicateError) {
+      console.error('Replicate API error:', {
+        error: replicateError,
+        message: replicateError instanceof Error ? replicateError.message : 'Unknown error',
+        stack: replicateError instanceof Error ? replicateError.stack : undefined,
+      });
+
       return NextResponse.json(
-        { error: 'Invalid response format from Replicate API' },
+        { 
+          error: 'Failed to generate images',
+          details: {
+            message: replicateError instanceof Error ? replicateError.message : 'Unknown error',
+            type: replicateError instanceof Error ? replicateError.constructor.name : typeof replicateError,
+          }
+        },
         { status: 500 }
       );
     }
-
-    // Filter out any invalid URLs
-    const validOutputs = output.filter(url => typeof url === 'string' && url.length > 0);
-    
-    if (validOutputs.length === 0) {
-      console.error('No valid outputs generated:', output);
-      return NextResponse.json(
-        { error: 'No valid images were generated' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ 
-      images: validOutputs,
-      debug: {
-        totalOutputs: output.length,
-        validOutputs: validOutputs.length,
-      }
-    });
   } catch (error) {
-    console.error('Error generating images:', error);
+    console.error('General error:', {
+      error,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
     return NextResponse.json(
       { 
-        error: 'Failed to generate images',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: 'An unexpected error occurred',
+        details: {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          type: error instanceof Error ? error.constructor.name : typeof error,
+        }
       },
       { status: 500 }
     );

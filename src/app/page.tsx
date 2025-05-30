@@ -108,6 +108,7 @@ export default function Home() {
         data: {
           ...data,
           images: data.images ? `${data.images.length} images` : 'no images',
+          debug: data.debug,
         },
         timestamp: new Date().toISOString(),
       };
@@ -122,17 +123,17 @@ export default function Home() {
       // Ensure we have an array of images
       if (!Array.isArray(data.images)) {
         console.error('Invalid response format:', data);
-        throw new Error('Invalid response format from the server');
+        throw new Error(`Invalid response format from the server: ${JSON.stringify(data)}`);
       }
 
       // Filter out any invalid image URLs
       const validImages = data.images.filter((url: any) => {
-        return typeof url === 'string' && url.length > 0;
+        return typeof url === 'string' && url.length > 0 && url.startsWith('http');
       });
       
       if (validImages.length === 0) {
         console.error('No valid images in response:', data);
-        throw new Error('No valid images were generated');
+        throw new Error(`No valid images were generated. API Response: ${JSON.stringify(data.debug?.rawResponse)}`);
       }
 
       console.log('Successfully processed images:', {
