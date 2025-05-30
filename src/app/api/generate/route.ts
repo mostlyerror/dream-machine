@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
-import { updateProgress, clearProgress } from '../progress/route';
+import { updateProgress, clearProgress } from '../progress/utils';
 import { v4 as uuidv4 } from 'uuid';
 
 interface PredictionResponse {
@@ -18,24 +18,6 @@ interface GenerateRequest {
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN,
 });
-
-// Map of transformation IDs to Replicate model versions
-const modelMap = {
-  sargent: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b" as const,
-  surrealist: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b" as const,
-  'color-palette': "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b" as const,
-  background: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b" as const,
-  composition: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b" as const,
-};
-
-// Map of transformation IDs to their corresponding prompts
-const promptMap = {
-  sargent: "Transform this image into the style of John Singer Sargent, with his characteristic loose brushwork, dramatic lighting, and elegant portraiture style",
-  surrealist: "Transform this image into a surrealist style, with dreamlike elements, unexpected juxtapositions, and a touch of Salvador Dali's influence",
-  'color-palette': "Create variations of this image with different color palettes while maintaining the original composition and subject matter",
-  background: "Keep the main subject but change the background to create different moods and settings",
-  composition: "Create alternative compositions of this image, exploring different angles, framing, and arrangements of elements",
-};
 
 async function waitForPrediction(predictionId: string, generationId: string): Promise<string[]> {
   let attempts = 0;

@@ -225,7 +225,7 @@ export default function Home() {
       await navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2));
       setCopyStatus('copied');
       setTimeout(() => setCopyStatus('idle'), 2000);
-    } catch (err) {
+    } catch {
       setCopyStatus('error');
       setTimeout(() => setCopyStatus('idle'), 2000);
     }
