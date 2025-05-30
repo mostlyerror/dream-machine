@@ -74,10 +74,18 @@ export default function Home() {
       }
 
       const data = await response.json();
-      setGeneratedImages(data.images);
+      // Filter out any empty or invalid image URLs
+      const validImages = data.images.filter((url: string) => url && url.trim() !== '');
+      
+      if (validImages.length === 0) {
+        throw new Error('No valid images were generated');
+      }
+      
+      setGeneratedImages(validImages);
     } catch (error) {
       console.error('Error:', error);
       setError(error instanceof Error ? error.message : 'An unexpected error occurred');
+      setGeneratedImages([]); // Clear any previous generated images on error
     } finally {
       setIsLoading(false);
     }
