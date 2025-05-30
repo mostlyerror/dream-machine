@@ -11,12 +11,34 @@ const transformations = [
   { id: 'composition', label: 'Show alternate compositions' },
 ];
 
+interface DebugInfo {
+  request?: {
+    transformation: string;
+    imageLength: number;
+    timestamp: string;
+  };
+  response?: {
+    status: number;
+    ok: boolean;
+    data: any;
+    timestamp: string;
+  };
+  error?: {
+    message: string;
+    details?: any;
+    timestamp: string;
+  };
+}
+
 export default function Home() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedTransformation, setSelectedTransformation] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isDebugMode, setIsDebugMode] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({});
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -56,7 +78,18 @@ export default function Home() {
     
     setIsLoading(true);
     setError(null);
+    setDebugInfo({});
+    
     try {
+      const requestInfo = {
+        transformation: selectedTransformation,
+        imageLength: selectedImage.length,
+        timestamp: new Date().toISOString(),
+      };
+      
+      setDebugInfo(prev => ({ ...prev, request: requestInfo }));
+      console.log('Starting generation request:', requestInfo);
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -68,33 +101,96 @@ export default function Home() {
         }),
       });
 
+      const data = await response.json();
+      const responseInfo = {
+        status: response.status,
+        ok: response.ok,
+        data: {
+          ...data,
+          images: data.images ? `${data.images.length} images` : 'no images',
+        },
+        timestamp: new Date().toISOString(),
+      };
+      
+      setDebugInfo(prev => ({ ...prev, response: responseInfo }));
+      console.log('API Response:', responseInfo);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to generate images');
+        throw new Error(data.error || data.details || 'Failed to generate images');
+      }
+      
+      // Ensure we have an array of images
+      if (!Array.isArray(data.images)) {
+        console.error('Invalid response format:', data);
+        throw new Error('Invalid response format from the server');
       }
 
-      const data = await response.json();
-      // Filter out any empty or invalid image URLs
-      const validImages = data.images.filter((url: string) => url && url.trim() !== '');
+      // Filter out any invalid image URLs
+      const validImages = data.images.filter((url: any) => {
+        return typeof url === 'string' && url.length > 0;
+      });
       
       if (validImages.length === 0) {
+        console.error('No valid images in response:', data);
         throw new Error('No valid images were generated');
       }
+
+      console.log('Successfully processed images:', {
+        total: data.images.length,
+        valid: validImages.length,
+        debug: data.debug,
+      });
       
       setGeneratedImages(validImages);
     } catch (error) {
-      console.error('Error:', error);
-      setError(error instanceof Error ? error.message : 'An unexpected error occurred');
+      console.error('Generation error:', error);
+      const errorInfo = {
+        message: error instanceof Error ? error.message : 'An unexpected error occurred',
+        details: error,
+        timestamp: new Date().toISOString(),
+      };
+      setDebugInfo(prev => ({ ...prev, error: errorInfo }));
+      setError(errorInfo.message);
       setGeneratedImages([]); // Clear any previous generated images on error
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleCopyDebug = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2));
+      setCopyStatus('copied');
+      setTimeout(() => setCopyStatus('idle'), 2000);
+    } catch (err) {
+      setCopyStatus('error');
+      setTimeout(() => setCopyStatus('idle'), 2000);
+    }
+  };
+
   return (
     <main className="min-h-screen p-8 bg-gray-50">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold text-gray-900 mb-8">Dream Machine</h1>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900">Dream Machine</h1>
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <span className="text-sm text-gray-600">Debug Mode</span>
+            <div className="relative">
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={isDebugMode}
+                onChange={(e) => setIsDebugMode(e.target.checked)}
+              />
+              <div className={`block w-14 h-8 rounded-full transition-colors ${
+                isDebugMode ? 'bg-blue-600' : 'bg-gray-300'
+              }`}></div>
+              <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${
+                isDebugMode ? 'transform translate-x-6' : ''
+              }`}></div>
+            </div>
+          </label>
+        </div>
         
         {/* Error Toast */}
         {error && (
@@ -121,6 +217,53 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Debug Panel */}
+        {isDebugMode && (
+          <div className="mb-6 bg-gray-100 rounded-lg p-4 font-mono text-sm">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-lg font-semibold">Debug Information</h2>
+              <button
+                onClick={handleCopyDebug}
+                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                  copyStatus === 'copied'
+                    ? 'bg-green-100 text-green-800'
+                    : copyStatus === 'error'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {copyStatus === 'copied' ? (
+                  <span className="flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Copied!
+                  </span>
+                ) : copyStatus === 'error' ? (
+                  <span className="flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Failed to copy
+                  </span>
+                ) : (
+                  <span className="flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                    Copy
+                  </span>
+                )}
+              </button>
+            </div>
+            <div className="relative">
+              <pre className="whitespace-pre-wrap overflow-x-auto bg-gray-50 p-4 rounded border border-gray-200">
+                {JSON.stringify(debugInfo, null, 2)}
+              </pre>
             </div>
           </div>
         )}
