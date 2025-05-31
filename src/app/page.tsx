@@ -478,6 +478,32 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Attribution */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 text-gray-500/50 hover:text-gray-400 transition-colors duration-300">
+        <div className="flex items-center gap-4 text-sm">
+          <span>made with <span className="text-pink-500">♥</span> by</span>
+          <div className="flex items-center gap-3">
+            <a 
+              href="https://instagram.com/beeteepee_" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:text-pink-400 transition-colors"
+            >
+              @beeteepee_
+            </a>
+            <span className="text-gray-600">•</span>
+            <a 
+              href="https://github.com/mostlyerror" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:text-purple-400 transition-colors"
+            >
+              github
+            </a>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }
